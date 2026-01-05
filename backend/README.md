@@ -56,3 +56,13 @@ api : router.patch('/contribution-request/:contribution_id/:status', updateContr
 
 query params : contribution_id and status name ("Approved", "Rejected") default is "Open"
 
+addMandalInvestment : 
+api : /mandal-investment
+{
+  "userId" : 2, Int
+  "amount" : 500, Int
+  "title" : "Bamboo", 
+  "description" : "", optional
+  "shopName" : "Mangilal",
+  "role" : "member"
+}

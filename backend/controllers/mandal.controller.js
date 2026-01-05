@@ -1,6 +1,8 @@
 require('dotenv').config();
 const bcrypt = require('bcrypt')
 const prisma = require('../lib/prisma');
+const jwt = require('jsonwebtoken');
+const JWT_SECRET = process.env.JWT_SECRET
 
 exports.checkHealth = async (req, res) => {
     try {
@@ -83,6 +85,7 @@ exports.userLogin = async (req, res) => {
         })
         const token = jwt.sign({ userId: user.user_id, role: userRoleName.role_name }, JWT_SECRET, { expiresIn: '2h' });
 
+        console.log("Generated Token: ", token); 
         return res.json({status: "SUCCESS", message: "Login successful", data: { token: token }});
     } catch (error) {
         return res.status(500).json({status: "ERROR", message: "Message: " + error.message});
@@ -306,7 +309,79 @@ exports.updateContributionRequestStatus = async (req, res) => {
   }
 }
 
-// Anyone can access our api, to add authentication we can use JWT or any other method as per requirement per api call.
-// We have to pass token to verify user for protected routes.
+exports.addMandalInvestment = async (req, res) => {
+  try {
+    const {userId, amount, title, description, shopName} = req.body;
 
-// Investment api is remaining to be done.
+    if(!userId || !amount || !title) {
+      return res.status(400).json({status: "ERROR", message: "All fields are required"});
+    }
+
+    const user = await prisma.users.findUnique({
+      where: { user_id: userId },
+      select: {
+        roles: {
+          select: {
+            role_name: true
+          }
+        }
+      }
+    });
+    console.log("User Role for Investment: ", user);
+    if(!user || (user.roles.role_name !== "treasurer" && user.roles.role_name !== "member" && user.roles.role_name !== "admin")) {
+      return res.status(403).json({status: "ERROR", message: "You are not authorized to perform this action"});
+    }
+
+    const investment = await prisma.investments.create({
+      data: {
+        amount: amount,
+        title: title,
+        description: description,
+        shopname: shopName,
+        users: {
+          connect: {
+            user_id: userId
+          }
+        }
+      }
+    });
+
+    if(!investment) {
+      return res.status(500).json({status: "ERROR", message: "Failed to add investment"});
+    }
+
+    return res.json({status: "SUCCESS", message: investment});  
+  } catch (error) {
+    
+  }
+}
+
+exports.updateMandalInvestment = async (req, res) => {
+  try {
+    const {investmentId, userId, amount, title, description, shopName} = req.body;
+    
+    if(!investmentId || !userId) {
+      return res.status(400).json({status: "ERROR", message: "Investment ID and User ID are required"});
+    }
+
+
+
+    const investment = await prisma.investments.update({
+      where: { investment_id: investmentId, user_id: userId },
+      data: {
+        amount: amount,
+        title: title,
+        description: description,
+        shopname: shopName
+      }
+    });
+
+    if(!investment) {
+      return res.status(500).json({status: "ERROR", message: "Invalid User or Investment ID"});
+    }
+
+    return res.json({status: "SUCCESS", message: investment});  
+  } catch (error) {
+    return res.status(500).json({status: "ERROR", message: error.message});
+  }
+}

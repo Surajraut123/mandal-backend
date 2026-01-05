@@ -12,7 +12,9 @@ const {
     getMandalMembers,
     requestContributionToAddInMandal,
     fetchContributionRequests,
-    updateContributionRequestStatus
+    updateContributionRequestStatus,
+    addMandalInvestment,
+    updateMandalInvestment
 
 } = require('../controllers/mandal.controller');
 
@@ -24,7 +26,9 @@ router.get('/contributed-users', verifyToken, getContributedUsers);
 router.get('/mandal-members', verifyToken, getMandalMembers);
 router.post('/request-contribution', verifyToken, requestContributionToAddInMandal);
 router.get('/fetch-requests', verifyToken, fetchContributionRequests);
-router.patch('/contribution-request/:contribution_id/:status/:userId', verifyToken, authorizeRoles , updateContributionRequestStatus);
+router.patch('/contribution-request/:contribution_id/:status/:userId', verifyToken, authorizeRoles("treasurer") , updateContributionRequestStatus);
+router.post('/mandal-investment', verifyToken, authorizeRoles("member", "treasurer", "admin") , addMandalInvestment);
+router.post('/update-mandal-investment/:investment_id', verifyToken, authorizeRoles("member", "treasurer", "admin") , updateMandalInvestment);
 
 
 module.exports = router;
