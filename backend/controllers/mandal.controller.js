@@ -213,6 +213,7 @@ exports.fetchContributionRequests = async (req, res) => {
         amount: true,
         phone_no: true,
         request_status: true,
+        created_at: true,
         users: {
           select: {
             user_id: true,
@@ -229,9 +230,41 @@ exports.fetchContributionRequests = async (req, res) => {
       return res.status(404).json({status: "ERROR", message: "No requests found"});
     }
 
-    return res.json({status: "SUCCESS", message: requests});
+    return res.json({status: "SUCCESS", data: requests});
   } catch (error) {
     return res.status(500).json({status: "ERROR", message: error.message});
+  }
+}
+
+exports.fetchMandalInvestments = async (req, res) => {
+  try {
+      const investments = await prisma.investments.findMany({
+        select: {
+          investment_id: true,
+          amount: true,
+          title: true,
+          description: true,
+          shopname: true,
+          created_at: true,
+          users: {
+            select: {
+              user_id: true,
+              firstname: true,
+              lastname: true,
+              email: true,
+              phone_no: true
+            }
+          }
+        }
+      });
+
+      if(!investments) {
+        return res.status(404).json({status: "ERROR", message: "No investments found"});
+      }
+
+      return res.json({status: "SUCCESS", data: investments});
+  } catch (error) {
+      return res.status(500).json({status: "ERROR", message: error.message});
   }
 }
 
