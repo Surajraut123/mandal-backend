@@ -8,6 +8,9 @@ exports.verifyToken = (req, res, next) => {
     if(!authHeader) {
       return res.status(401).json({status: "ERROR", message: "Access Denied"})
     }
+
+    console.log("jwt secret value : ", JWT_SECRET)
+    console.log("authheader : ", authHeader)
     const token = authHeader.split(' ')[1];
     console.log("Token verify : ", token)
     jwt.verify(token, JWT_SECRET, (err, user) => {

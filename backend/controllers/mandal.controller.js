@@ -86,7 +86,7 @@ exports.userLogin = async (req, res) => {
         const token = jwt.sign({ userId: user.user_id, role: userRoleName.role_name }, JWT_SECRET, { expiresIn: '2h' });
 
         console.log("Generated Token: ", token); 
-        return res.json({status: "SUCCESS", message: "Login successful", data: { token: token }});
+        return res.json({status: "SUCCESS", message: "Login successful", data: { token: token, role: userRoleName.role_name, userId: user.user_id }});
     } catch (error) {
         return res.status(500).json({status: "ERROR", message: "Message: " + error.message});
     }
