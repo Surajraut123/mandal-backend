@@ -1,6 +1,5 @@
 const jwt = require('jsonwebtoken');
 require('dotenv').config();
-const JWT_SECRET = process.env.JWT_SECRET
 
 
 exports.verifyToken = (req, res, next) => {
@@ -8,11 +7,12 @@ exports.verifyToken = (req, res, next) => {
     if(!authHeader) {
       return res.status(401).json({status: "ERROR", message: "Access Denied"})
     }
-
+    const JWT_SECRET = process.env.JWT_SECRET
     console.log("jwt secret value : ", JWT_SECRET)
     console.log("authheader : ", authHeader)
     const token = authHeader.split(' ')[1];
     console.log("Token verify : ", token)
+
     jwt.verify(token, JWT_SECRET, (err, user) => {
       if (err) return res.status(403).json({ message: "Invalid token" });
       req.user = user;
