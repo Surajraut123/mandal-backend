@@ -3,8 +3,11 @@ const cors = require('cors');
 require('dotenv').config();
 const app = express();
 const port = process.env.PORT || 3000;;
-app.use(express.json());
+const cookieParser = require("cookie-parser");
+app.use(cookieParser());
 
+app.use(express.json());
+  
 const allowedOrigins = ['http://localhost:5173'];
 
 app.use(cors({

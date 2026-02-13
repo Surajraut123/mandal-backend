@@ -2,6 +2,12 @@ require('dotenv').config();
 const bcrypt = require('bcrypt')
 const prisma = require('../lib/prisma');
 const jwt = require('jsonwebtoken');
+const { createContribution } = require('../services/contribution.service');
+const { getContributionRequests } = require('../services/contributionRequest.service');
+const { getInvestmentRequests } = require('../services/investmentRequest.service');
+const { requestContributionToAdd } = require('../services/requestContributionToAdd.service');
+const { requestInvestmentToAdd } = require('../services/requestInvestmentToAdd.service');
+const { getMandalMembers } = require('../services/getMandalMemebers.service');
 const JWT_SECRET = process.env.JWT_SECRET
 
 exports.checkHealth = async (req, res) => {
@@ -11,6 +17,14 @@ exports.checkHealth = async (req, res) => {
     } catch (error) {
         return res.status(500).json({ status: "ERROR", message: error.message } );
     }
+}
+
+exports.authCheck = async (req, res) => {
+  try {
+    return res.json({ status: "SUCCESS", "isAuthenticated": true, });
+  } catch (error) {
+    return res.status(500).json({ status: "ERROR", message: error.message });
+  }
 }
 
  
@@ -63,19 +77,18 @@ exports.userLogin = async (req, res) => {
         return res.status(400).json({status: "ERROR", message: "Email and Password are required"});
     }
     try {
-        
         const user = await prisma.users.findUnique({ 
           where: {email},
           select: { user_id: true, password: true, role_id: true }
         });
-
         if(!user) {
-            return res.status(404).json({status: "ERROR", message: "Invalid credentials"});
+          return res.status(404).json({status: "ERROR", message: "Invalid credentials"});
         }
-
+        
         const isPasswordValid = await bcrypt.compare(password, user.password);
-
+        console.log("Password Valid: ", isPasswordValid);
         if(!isPasswordValid) {
+          console.log("User found: ", user);
             return res.status(401).json({status: "ERROR", message: "Invalid credentials"});
         }
 
@@ -85,8 +98,14 @@ exports.userLogin = async (req, res) => {
         })
         const token = jwt.sign({ userId: user.user_id, role: userRoleName.role_name }, JWT_SECRET, { expiresIn: '2h' });
 
+        res.cookie("access_token", token, {
+          httpOnly: true,
+          secure: true,
+          sameSite: "none",
+        });
+
         console.log("Generated Token: ", token); 
-        return res.json({status: "SUCCESS", message: "Login successful", data: { token: token, role: userRoleName.role_name, userId: user.user_id }});
+        return res.json({status: "SUCCESS", message: "Login successful", data: { role: userRoleName.role_name, userId: user.user_id }});
     } catch (error) {
         return res.status(500).json({status: "ERROR", message: "Message: " + error.message});
     }
@@ -95,32 +114,36 @@ exports.userLogin = async (req, res) => {
 exports.contributions = async (req, res) => {
   try {
     const {userId, amount, donorName, phone_no} = req.body;
-    console.log(req.body);
+    console.log("Contributions body : ", req.body);
     if(!userId || !amount || !donorName) {
       return res.status(400).json({status: "ERROR", message: "All fields are required"});
     }
 
-    const contribution = await prisma.contributions.create({
-      data: {
-        users: {
-          connect: {
-            user_id: userId
-          }
-        },
-        amount: amount,
-        donor_name: donorName,
-        phone_no: phone_no,
-        contribution_date: new Date()
-      }
+    const contribution = await createContribution({
+      userId,
+      amount,
+      donorName,
+      phone_no
     });
 
     if(!contribution) {
       return res.status(500).json({status: "ERROR", message: "Failed to record contribution"});
     }
 
-    return res.status(200).json({status: "SUCCESS", message: "Contribution added for new donor " + contribution});  
+    return res.status(201).json({status: "SUCCESS", message: "Contribution added for new donor " + contribution});  
   } catch (error) {
-    return res.status(500).json({status: "ERROR", message: error.message});
+    console.error("Contribution error:", error);
+    if (error.code === "P2002") {
+      return res.status(409).json({
+        status: "ERROR",
+        message: "Phone number already exists"
+      });
+    }
+
+    return res.status(500).json({
+      status: "ERROR",
+      message: error.message
+    });
   }
 }
 
@@ -147,27 +170,13 @@ exports.getContributedUsers = async (req, res) => {
 
 exports.getMandalMembers = async (req, res) => {
   try {
-    const members = await prisma.users.findMany({
-      select: {
-        user_id: true,
-        firstname: true,
-        lastname: true,
-        email: true,
-        phone_no: true,
-        profile: true,
-        roles: {
-          select: {
-            role_name: true
-          }
-        }
-      }
-    });
+    const members = await getMandalMembers()
 
     if(!members) {
       return res.status(404).json({status: "ERROR", message: "No members found"});
     }
 
-    return res.json({status: "SUCCESS", message: members});
+    return res.json({status: "SUCCESS", userList: members});
   } catch (error) {
     return res.status(500).json({status: "ERROR", message: error.message});
   }
@@ -181,50 +190,66 @@ exports.requestContributionToAddInMandal = async (req, res) => {
       return res.status(400).json({status: "ERROR", message: "All fields are required"});
     }
 
-    const request = await prisma.contribution_requests.create({
-      data: {
-        donor_name: donorName,
-        amount: amount,
-        users : {
-          connect: { user_id: userId }
-        },
-        phone_no: phone_no,
-        request_status: "OPEN"
-      }
-    });
+    const request = await requestContributionToAdd(
+      donorName,
+      phone_no,
+      userId,
+      amount
+    );
 
     if(!request) {
       return res.status(500).json({status: "ERROR", message: "Failed to send request"});
     }
 
-    return res.json({status: "SUCCESS", message: request});
+    return res.json({status: "SUCCESS", data: request, message: "Contribution request sent successfully"});
   } catch (error) {
     return res.status(500).json({status: "ERROR", message: error.message});
   }
 }
 
+exports.requestInvestmentToAddInMandal = async (req, res) => {
+  try {
+    const {shopName, userId, amount, title, description} = req.body;
+    console.log(req.body);
+    if(!amount || !userId || !title) {
+      return res.status(400).json({status: "ERROR", message: "All fields are required"});
+    }
+
+    const request = await requestInvestmentToAdd(
+      shopName,
+      userId,
+      amount,
+      title,
+      description
+    );
+
+    if(!request) {
+      return res.status(500).json({status: "ERROR", message: "Failed to send investment request"});
+    }
+
+    return res.json({status: "SUCCESS", message: "Investment request sent successfully", data: request});
+  } catch (error) {
+    return res.status(500).json({status: "ERROR", message: error.message});
+  }
+}
+
+exports.fetchInvestmentRequests = async (req, res) => {
+  try {
+    const requests = await getInvestmentRequests()
+
+    if(!requests) {
+      return res.status(404).json({status: "ERROR", message: "No investment requests found"});
+    }
+
+    return res.json({status: "SUCCESS", data: requests});
+  } catch (error) {
+    return res.status(500).json({status: "ERROR", message: error.message});
+  }
+}
 
 exports.fetchContributionRequests = async (req, res) => {
   try {
-    const requests = await prisma.contribution_requests.findMany({
-      select: {
-        request_id: true,
-        donor_name: true,
-        amount: true,
-        phone_no: true,
-        request_status: true,
-        created_at: true,
-        users: {
-          select: {
-            user_id: true,
-            firstname: true,
-            lastname: true,
-            email: true,
-            phone_no: true
-          }
-        }
-      }
-    });
+    const requests = await getContributionRequests()
 
     if(!requests) {
       return res.status(404).json({status: "ERROR", message: "No requests found"});
@@ -232,7 +257,7 @@ exports.fetchContributionRequests = async (req, res) => {
 
     return res.json({status: "SUCCESS", data: requests});
   } catch (error) {
-    return res.status(500).json({status: "ERROR", message: error.message});
+    return res.status(500).json({status: "ERROR", message: "CHECK : " + error.message});
   }
 }
 
@@ -270,7 +295,9 @@ exports.fetchMandalInvestments = async (req, res) => {
 
 exports.updateContributionRequestStatus = async (req, res) => {
   try {
-    const {contribution_id, status, userId} = req.params;
+    const {contribution_id, status} = req.params;
+    const userId = Number(req.user.userId);
+    console.log("UserId from token: ", userId);
 
     if(!userId) {
       return res.status(400).json({status: "ERROR", message: "Access Denied"});
@@ -311,6 +338,7 @@ exports.updateContributionRequestStatus = async (req, res) => {
     }
 
     console.log("Updated Request: ", status.toUpperCase());
+    console.log("updatedRequest: ", updatedRequest);
     if(status.toUpperCase() == "APPROVED") {
       const donorAlreadyContributed = await prisma.contributions.findFirst({
         where: {
@@ -326,17 +354,78 @@ exports.updateContributionRequestStatus = async (req, res) => {
         });
         return res.json({status: "SUCCESS", message: "Contribution updated for existing donor"});
       } else {
-        this.contributions({
-          body: {
-            userId: updatedRequest.user_id,
-            amount: updatedRequest.amount,
-            donorName: updatedRequest.donor_name,
-            phone_no: updatedRequest.phone_no
-          }
+        await createContribution({
+          userId: updatedRequest.user_id,
+          amount: updatedRequest.amount,
+          donorName: updatedRequest.donor_name,
+          phone_no: updatedRequest.phone_no
         });
       }
     }
-    return res.json({status: "SUCCESS", message: "Request Rejected successfully"});
+    return res.status(200).json({status: "SUCCESS", message: "Request Approved successfully"});
+  } catch (error) {
+    return res.status(500).json({status: "ERROR", message: error.message});
+  }
+}
+
+exports.updateInvestmentRequestStatus = async (req, res) => {
+  try {
+    const {investment_id, status} = req.params;
+    const userId = req.user.userId;
+    if(!userId) {
+      return res.status(400).json({status: "ERROR", message: "Access Denied"});
+    }
+
+    const verifyUserRole = await prisma.users.findUnique({
+      where: { user_id: parseInt(userId) },
+      select: {
+        roles: {
+          select: {
+            role_name: true
+          }
+        }
+      }
+    });
+
+    console.log("Verify User Role: ", verifyUserRole);
+    if(!verifyUserRole || verifyUserRole.roles.role_name !== "treasurer") {
+      return res.status(403).json({status: "ERROR", message: "You are not authorized to perform this action"});
+    }
+
+    if(!investment_id || !status) {
+      return res.status(400).json({status: "ERROR", message: "Investment ID and Status are required"});
+    }
+
+    const validStatuses = ["OPEN", "APPROVED", "REJECTED"];
+    if(!validStatuses.includes(status.toUpperCase())) {
+      return res.status(400).json({status: "ERROR", message: "Invalid status value"});
+    }
+
+    const updatedRequest = await prisma.investment_requests.update({
+      where: { request_id: parseInt(investment_id) },
+      data: { request_status: status.toUpperCase() }
+    });
+
+    if(!updatedRequest) {
+      return res.status(500).json({status: "ERROR", message: "Failed to update request status"});
+    }
+
+    console.log("Updated Investment Request: ", updatedRequest);
+    if(status.toUpperCase() == "APPROVED") {
+      await prisma.investments.create({
+        data: {
+          amount: updatedRequest.amount,
+          title: updatedRequest.title,
+          description: updatedRequest.description,
+          shopname: updatedRequest.shop_name,
+          users: {
+            connect: { user_id: updatedRequest.user_id }
+          }
+        }
+      });
+      return res.json({status: "SUCCESS", message: "Investment added successfully"});
+    }
+    return res.json({status: "SUCCESS", message: "Investment Request Rejected successfully"});
   } catch (error) {
     return res.status(500).json({status: "ERROR", message: error.message});
   }
@@ -385,7 +474,7 @@ exports.addMandalInvestment = async (req, res) => {
 
     return res.json({status: "SUCCESS", message: investment});  
   } catch (error) {
-    
+    return res.status(500).json({status: "ERROR", message: error.message} );
   }
 }
 

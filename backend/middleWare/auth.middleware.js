@@ -1,32 +1,60 @@
-const jwt = require('jsonwebtoken');
 require('dotenv').config();
+const jwt = require('jsonwebtoken');
+const prisma = require('../lib/prisma');
 
 
 exports.verifyToken = (req, res, next) => {
-    const authHeader = req.headers.authorization;
-    if(!authHeader) {
-      return res.status(401).json({status: "ERROR", message: "Access Denied"})
+    const accessToken = req.cookies.access_token;
+    if (!accessToken) {
+      return res.status(401).json({
+        status: "ERROR",
+        message: "Access Denied"
+      });
     }
-    const JWT_SECRET = process.env.JWT_SECRET
-    console.log("jwt secret value : ", JWT_SECRET)
-    console.log("authheader : ", authHeader)
-    const token = authHeader.split(' ')[1];
-    console.log("Token verify : ", token)
+    const JWT_SECRET = process.env.JWT_SECRET;
 
-    jwt.verify(token, JWT_SECRET, (err, user) => {
-      if (err) return res.status(403).json({ message: "Invalid token" });
+    jwt.verify(accessToken, JWT_SECRET, (err, user) => {
+      if (err) {
+    
+        if (err.name === "TokenExpiredError") {
+          return res.status(401).json({
+            message: "Your session is expired, please login again"
+          });
+        }
+    
+        return res.status(403).json({
+          message: "Invalid token"
+        });
+      }
+    
       req.user = user;
       next();
-    })
+    });
 }
 
 exports.authorizeRoles = (...allowedRoles) => {
-    return (req, res, next) => {
-        const userRole = req.body.role;
-        console.log("User Role: ", userRole);
-        console.log("allowedRoles Role: ", allowedRoles);
-        if (!allowedRoles.includes(userRole)) {
-            return res.status(403).json({ status: "ERROR", message: "Forbidden: You don't have enough privileges to access this resource." });
+    return async (req, res, next) => {
+        const userId = req.user.userId;
+        // console.log("User Role: ", userRole);
+        // console.log("allowedRoles Role: ", allowedRoles);
+        // if (!allowedRoles.includes(userRole)) {
+        //     return res.status(403).json({ status: "ERROR", message: "Forbidden: You don't have enough privileges to access this resource." });
+        // }
+        console.log("Inside authorizeRoles middleware, UserId: ", userId);
+        const verifyUserRole = await prisma.users.findUnique({
+          where: { user_id: parseInt(userId) },
+          select: {
+            roles: {
+              select: {
+                role_name: true
+              }
+            }
+          }
+        });
+    
+        console.log("Verify User Role: ", verifyUserRole);
+        if(!verifyUserRole || verifyUserRole.roles.role_name !== "treasurer") {
+          return res.status(403).json({status: "ERROR", message: "You are not authorized to perform this action"});
         }
         next();
     }
