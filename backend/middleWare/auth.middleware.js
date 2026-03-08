@@ -51,9 +51,15 @@ exports.authorizeRoles = (...allowedRoles) => {
             }
           }
         });
+
+        if(!verifyUserRole) {
+          return res.status(404).json({status: "ERROR", message: "User not found"});
+        }
+
+        const userRole = verifyUserRole.roles.role_name;
     
         console.log("Verify User Role: ", verifyUserRole);
-        if(!verifyUserRole || verifyUserRole.roles.role_name !== "treasurer") {
+        if (!allowedRoles.includes(userRole)) {
           return res.status(403).json({status: "ERROR", message: "You are not authorized to perform this action"});
         }
         next();

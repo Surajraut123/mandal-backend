@@ -8,7 +8,110 @@ const { getInvestmentRequests } = require('../services/investmentRequest.service
 const { requestContributionToAdd } = require('../services/requestContributionToAdd.service');
 const { requestInvestmentToAdd } = require('../services/requestInvestmentToAdd.service');
 const { getMandalMembers } = require('../services/getMandalMemebers.service');
+const { checkUserRole } = require('../services/checkUserRole');
+const { supabase } = require('../supabase-connection/supabase.config');
 const JWT_SECRET = process.env.JWT_SECRET
+
+
+const sendEmailOTP = async (email) => {
+  const { data, error } = await supabase.auth.signInWithOtp({
+    email: email,
+    options: {
+      shouldCreateUser: false,
+    }
+  });
+
+  if (error) {
+    console.error('Error sending OTP:', error.message);
+    return { success: false, error: error.message };
+  }
+  
+  return { success: true, message: 'OTP sent to email' };
+};
+
+const verifyEmailOTP = async (email, otp) => {
+  const { data, error } = await supabase.auth.verifyOtp({
+    email: email,
+    token: otp,
+    type: 'email'
+  });
+
+  if (error) {
+    console.error('Error verifying OTP:', error.message);
+    return { success: false, error: error.message };
+  }
+
+  return { success: true, user: data.user };
+};
+
+exports.verifyEmailOTP = async (req, res) => {
+  try {
+    const { email, otp } = req.body;
+    if (!email || !otp) {
+      return res.status(400).json({ status: "ERROR", message: "Email and OTP are required" });
+    }
+
+    const result = await verifyEmailOTP(email, otp);
+    if (result.success) {
+      return res.status(200).json({ status: "SUCCESS", message: "OTP verified successfully" });
+    } else {
+      return res.status(400).json({ status: "ERROR", message: result.error });
+    }
+  } catch (error) {
+    return res.status(500).json({ status: "ERROR", message: error.message });
+  }
+}
+
+exports.sendEmailOTP = async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ status: "ERROR", message: "Email is required" });
+    }
+
+    const user = await prisma.users.findUnique({ 
+      where: {email},
+      select: { user_id: true, password: true, role_id: true }
+    });
+
+    if(!user) {
+      return res.status(404).json({status: "ERROR", message: "Email not registered"});
+    }
+
+    const result = await sendEmailOTP(email);
+    if (result.success) {
+      return res.status(200).json({ status: "SUCCESS", message: result.message });
+    } else {
+      return res.status(500).json({ status: "ERROR", message: result.error });
+    }
+  } catch (error) {
+    return res.status(500).json({ status: "ERROR", message: error.message });
+  }
+}
+
+exports.resetPassword = async (req, res) => {
+  try {
+    const { email, newPassword } = req.body;
+    if (!email || !newPassword) {
+      return res.status(400).json({ status: "ERROR", message: "Email and new password are required" });
+    }
+
+    const user = await prisma.users.findUnique({ where: { email } });
+    if (!user) {
+      return res.status(404).json({ status: "ERROR", message: "Email not registered" });
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    await prisma.users.update({
+      where: { email },
+      data: { password: hashedPassword }
+    });
+
+    return res.status(200).json({ status: "SUCCESS", message: "Password reset successfully" });
+  } catch (error) {
+    return res.status(500).json({ status: "ERROR", message: error.message });
+  }
+}
 
 exports.checkHealth = async (req, res) => {
     try {
@@ -19,14 +122,123 @@ exports.checkHealth = async (req, res) => {
     }
 }
 
-exports.authCheck = async (req, res) => {
+exports.fetchProfile = async (req, res) => {
   try {
-    return res.json({ status: "SUCCESS", "isAuthenticated": true, });
+    const userId = req.user.userId;
+    const userProfile = await prisma.users.findUnique({
+      where: { user_id: userId },
+      select: {
+        firstname: true,
+        lastname: true,
+        email: true,
+        phone_no: true,
+        profile: true,
+        status: true,
+        roles: {
+          select: {
+            role_name: true
+          }
+        }
+      }
+    });
+
+    if (!userProfile) {
+      return res.status(404).json({ status: "ERROR", message: "User not found" });
+    }
+
+    return res.status(200).json({ status: "SUCCESS", data: userProfile });
   } catch (error) {
     return res.status(500).json({ status: "ERROR", message: error.message });
   }
 }
 
+exports.updateProfile = async (req, res) => {
+  try {
+    console.log("Update Profile Request Body: ", req.body);
+    const userId = req.user.userId;
+    const { firstName, lastName, email, phone } = req.body;
+    console.log("req.file:", req.file);
+    const existingUser = await prisma.users.findUnique({
+      where: { user_id: userId }
+    });
+
+    if (!existingUser) {
+      return res.status(404).json({ status: "ERROR", message: "User not found" });
+    }
+
+    if (email && email !== existingUser.email) {
+      const emailExists = await prisma.users.findUnique({
+        where: { email }
+      });
+      
+      if (emailExists) {
+        return res.status(400).json({ status: "ERROR", message: "Email already in use" });
+      }
+    }
+
+    const updateData = {};
+    if (firstName) updateData.firstname = firstName;
+    if (lastName) updateData.lastname = lastName;
+    if (email) updateData.email = email;
+    if (phone) updateData.phone_no = phone;
+
+    if (req.file) {
+      updateData.profile = req.file.path; 
+    }
+
+    const updatedUser = await prisma.users.update({
+      where: { user_id: userId },
+      data: updateData,
+      select: {
+        firstname: true,
+        lastname: true,
+        email: true,
+        phone_no: true,
+        profile: true,
+        status: true,
+        roles: {
+          select: {
+            role_name: true
+          }
+        }
+      }
+    });
+
+    return res.status(200).json({ 
+      status: "SUCCESS", 
+      message: "Profile updated successfully",
+      data: updatedUser 
+    });
+  } catch (error) {
+    console.error("Error updating profile:", error);
+    return res.status(500).json({ status: "ERROR", message: error.message });
+  }
+};
+
+exports.authCheck = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const {roleName, fullName, profile} = await checkUserRole(userId)
+    return res.json({ status: "SUCCESS", "isAuthenticated": true, role: roleName, userId: userId, fullName: fullName, profile: profile });
+  } catch (error) {
+    return res.status(500).json({ status: "ERROR", message: error.message });
+  }
+}
+
+exports.logout = async (req, res) => {
+  try {
+    res.clearCookie("access_token", {
+      httpOnly: true,
+      secure: true,
+      sameSite: "none",
+    });
+      
+    return res.status(200).json({ status: "SUCCESS", message: "Logged out successfully" });
+    
+  } catch (error) {
+    return res.status(403).json({ status: "ERROR", message : error.message})
+  }
+}
  
 exports.userRegistration = async (req, res) => {
     try {
@@ -45,6 +257,16 @@ exports.userRegistration = async (req, res) => {
   
       if (!roleData) {
         return res.status(400).json({ status: "ERROR", message: "Invalid role" });
+      }
+
+      const isAdminAlreadyExists = await prisma.users.findFirst({
+        where: {
+          role_id: roleData.role_id
+        }
+      });
+
+      if(role.toLowerCase() === "admin" && isAdminAlreadyExists) {
+        return res.status(409).json({ status: "WARNING", message: "Admin already exists!" });
       }
   
       const hashedPassword = await bcrypt.hash(password, 10);
@@ -162,7 +384,7 @@ exports.getContributedUsers = async (req, res) => {
       return res.status(404).json({status: "ERROR", message: "No contributions found"});
     }
 
-    return res.json({status: "SUCCESS", message: contributions});
+    return res.json({status: "SUCCESS", data: contributions});
   } catch (error) {
     return res.status(500).json({status: "ERROR", message: error.message});
   }
@@ -190,11 +412,19 @@ exports.requestContributionToAddInMandal = async (req, res) => {
       return res.status(400).json({status: "ERROR", message: "All fields are required"});
     }
 
+    const user = await prisma.users.findUnique({
+      where: { user_id: Number(userId) }
+    });
+
+    if(!user) {
+      return res.status(404).json({status: "ERROR", message: "User not found"});
+    }
+
     const request = await requestContributionToAdd(
       donorName,
+      amount,
       phone_no,
-      userId,
-      amount
+      userId
     );
 
     if(!request) {
@@ -235,7 +465,8 @@ exports.requestInvestmentToAddInMandal = async (req, res) => {
 
 exports.fetchInvestmentRequests = async (req, res) => {
   try {
-    const requests = await getInvestmentRequests()
+    const userId = req.user.userId
+    const requests = await getInvestmentRequests(userId)
 
     if(!requests) {
       return res.status(404).json({status: "ERROR", message: "No investment requests found"});
@@ -249,7 +480,9 @@ exports.fetchInvestmentRequests = async (req, res) => {
 
 exports.fetchContributionRequests = async (req, res) => {
   try {
-    const requests = await getContributionRequests()
+    const userId = req.user.userId
+    console.log("userid : ", userId)
+    const requests = await getContributionRequests(userId)
 
     if(!requests) {
       return res.status(404).json({status: "ERROR", message: "No requests found"});
@@ -315,7 +548,10 @@ exports.updateContributionRequestStatus = async (req, res) => {
     });
 
     console.log("Verify User Role: ", verifyUserRole);
-    if(!verifyUserRole || verifyUserRole.roles.role_name !== "treasurer") {
+    const allowedRoles = ["treasurer", "admin"];
+    const userRole = verifyUserRole.roles.role_name.toLowerCase();
+    
+    if(!verifyUserRole || !allowedRoles.includes(userRole)) {
       return res.status(403).json({status: "ERROR", message: "You are not authorized to perform this action"});
     }
 
@@ -328,6 +564,13 @@ exports.updateContributionRequestStatus = async (req, res) => {
       return res.status(400).json({status: "ERROR", message: "Invalid status value"});
     }
 
+    const currentRequest = await prisma.contribution_requests.findUnique({
+      where: { request_id: parseInt(contribution_id) }
+    });
+    
+    const previousStatus = currentRequest.request_status.toUpperCase();
+    const newStatus = status.toUpperCase();
+
     const updatedRequest = await prisma.contribution_requests.update({
       where: { request_id: parseInt(contribution_id) },
       data: { request_status: status.toUpperCase() }
@@ -339,20 +582,21 @@ exports.updateContributionRequestStatus = async (req, res) => {
 
     console.log("Updated Request: ", status.toUpperCase());
     console.log("updatedRequest: ", updatedRequest);
+    const donorAlreadyContributed = await prisma.contributions.findFirst({
+      where: {
+        donor_name: updatedRequest.donor_name,
+        phone_no: updatedRequest.phone_no
+      }
+    });
+    
+    console.log("Donor Already Contributed: ", donorAlreadyContributed);
     if(status.toUpperCase() == "APPROVED") {
-      const donorAlreadyContributed = await prisma.contributions.findFirst({
-        where: {
-          donor_name: updatedRequest.donor_name,
-          phone_no: updatedRequest.phone_no
-        }
-      });
-      console.log("Donor Already Contributed: ", donorAlreadyContributed);
       if(donorAlreadyContributed) {
         await prisma.contributions.update({
           where: { contribution_id: donorAlreadyContributed.contribution_id },
           data: { amount: Number(donorAlreadyContributed.amount) + Number(updatedRequest.amount) }
         });
-        return res.json({status: "SUCCESS", message: "Contribution updated for existing donor"});
+        return res.json({status: "SUCCESS", message: "Request Approved successfully for existing donor"});
       } else {
         await createContribution({
           userId: updatedRequest.user_id,
@@ -361,8 +605,39 @@ exports.updateContributionRequestStatus = async (req, res) => {
           phone_no: updatedRequest.phone_no
         });
       }
+      return res.status(200).json({status: "SUCCESS", message: "Request Approved successfully for new user"});
+    } else if (status.toUpperCase() === "REJECTED") {
+      if (previousStatus === 'APPROVED' && newStatus === 'REJECTED') {
+        if(donorAlreadyContributed) {
+          const finalDonationAmount = donorAlreadyContributed.amount - updatedRequest.amount;
+          if(finalDonationAmount == 0) {
+            await prisma.contributions.delete({
+              where: { contribution_id: donorAlreadyContributed.contribution_id}
+            })
+          } else if(finalDonationAmount > 0){
+            await prisma.contributions.update({
+              where: {
+                contribution_id: donorAlreadyContributed.contribution_id
+              },
+              data: {
+                amount: finalDonationAmount
+              }
+            })
+          } else{
+            return res.status(400).json({
+              status: "ERROR", 
+              message: `Cannot reject. Donor contributed ₹${donorAlreadyContributed.amount}, but request is ₹${updatedRequest.amount}`
+            });
+          }
+          return res.status(200).json({status: "SUCCESS", message: "Request Rejected successfully for existing donor"});
+        }
+        return res.status(403).json({status: "SUCCESS", message: "Something went wrong"});
+      } else{
+        return res.status(200).json({status: "SUCCESS", message: "Request Rejected successfully"});
+      }
+    } else{
+      return res.status(200).json({status: "SUCCESS", message: "Not allowed to OPEN the status"});
     }
-    return res.status(200).json({status: "SUCCESS", message: "Request Approved successfully"});
   } catch (error) {
     return res.status(500).json({status: "ERROR", message: error.message});
   }
@@ -370,10 +645,11 @@ exports.updateContributionRequestStatus = async (req, res) => {
 
 exports.updateInvestmentRequestStatus = async (req, res) => {
   try {
-    const {investment_id, status} = req.params;
+    const { investment_id, status } = req.params;
     const userId = req.user.userId;
-    if(!userId) {
-      return res.status(400).json({status: "ERROR", message: "Access Denied"});
+
+    if (!userId) {
+      return res.status(400).json({ status: "ERROR", message: "Access Denied" });
     }
 
     const verifyUserRole = await prisma.users.findUnique({
@@ -387,49 +663,94 @@ exports.updateInvestmentRequestStatus = async (req, res) => {
       }
     });
 
-    console.log("Verify User Role: ", verifyUserRole);
-    if(!verifyUserRole || verifyUserRole.roles.role_name !== "treasurer") {
-      return res.status(403).json({status: "ERROR", message: "You are not authorized to perform this action"});
+    if (!verifyUserRole || verifyUserRole.roles.role_name !== "treasurer") {
+      return res.status(403).json({ status: "ERROR", message: "You are not authorized to perform this action" });
     }
 
-    if(!investment_id || !status) {
-      return res.status(400).json({status: "ERROR", message: "Investment ID and Status are required"});
+    if (!investment_id || !status) {
+      return res.status(400).json({ status: "ERROR", message: "Investment ID and Status are required" });
     }
 
     const validStatuses = ["OPEN", "APPROVED", "REJECTED"];
-    if(!validStatuses.includes(status.toUpperCase())) {
-      return res.status(400).json({status: "ERROR", message: "Invalid status value"});
+    if (!validStatuses.includes(status.toUpperCase())) {
+      return res.status(400).json({ status: "ERROR", message: "Invalid status value" });
+    }
+
+    const currentRequest = await prisma.investment_requests.findUnique({
+      where: { request_id: parseInt(investment_id) }
+    });
+
+    if (!currentRequest) {
+      return res.status(404).json({ status: "ERROR", message: "Investment request not found" });
+    }
+
+    const previousStatus = currentRequest.request_status.toUpperCase();
+    const newStatus = status.toUpperCase();
+
+    const validTransitions = {
+      'OPEN': ['APPROVED', 'REJECTED'],
+      'APPROVED': ['REJECTED'],
+      'REJECTED': []
+    };
+
+    if (!validTransitions[previousStatus].includes(newStatus)) {
+      return res.status(400).json({
+        status: "ERROR",
+        message: `Cannot change status from ${previousStatus} to ${newStatus}`
+      });
     }
 
     const updatedRequest = await prisma.investment_requests.update({
       where: { request_id: parseInt(investment_id) },
-      data: { request_status: status.toUpperCase() }
+      data: { request_status: newStatus }
     });
 
-    if(!updatedRequest) {
-      return res.status(500).json({status: "ERROR", message: "Failed to update request status"});
-    }
-
-    console.log("Updated Investment Request: ", updatedRequest);
-    if(status.toUpperCase() == "APPROVED") {
+    if (previousStatus === 'OPEN' && newStatus === 'APPROVED') {
       await prisma.investments.create({
         data: {
           amount: updatedRequest.amount,
           title: updatedRequest.title,
           description: updatedRequest.description,
           shopname: updatedRequest.shop_name,
-          users: {
-            connect: { user_id: updatedRequest.user_id }
-          }
+          updated_by: parseInt(userId)
         }
       });
-      return res.json({status: "SUCCESS", message: "Investment added successfully"});
+      return res.json({ status: "SUCCESS", message: "Investment approved and added successfully" });
     }
-    return res.json({status: "SUCCESS", message: "Investment Request Rejected successfully"});
+
+    if (previousStatus === 'OPEN' && newStatus === 'REJECTED') {
+      return res.json({ status: "SUCCESS", message: "Investment request rejected" });
+    }
+
+    if (previousStatus === 'APPROVED' && newStatus === 'REJECTED') {
+      const existingInvestment = await prisma.investments.findFirst({
+        where: {
+          title: updatedRequest.title,
+          shopname: updatedRequest.shop_name,
+          amount: updatedRequest.amount
+        }
+      });
+
+      if (existingInvestment) {
+        await prisma.investments.delete({
+          where: { investment_id: existingInvestment.investment_id }
+        });
+        return res.json({ status: "SUCCESS", message: "Investment rejected and removed successfully" });
+      } else {
+        return res.status(500).json({
+          status: "ERROR",
+          message: "Data inconsistency: Investment not found for approved request"
+        });
+      }
+    }
+
+    return res.json({ status: "SUCCESS", message: "Status updated successfully" });
+
   } catch (error) {
-    return res.status(500).json({status: "ERROR", message: error.message});
+    console.error("Error updating investment request:", error);
+    return res.status(500).json({ status: "ERROR", message: error.message });
   }
-}
+};
 
 exports.addMandalInvestment = async (req, res) => {
   try {
@@ -505,5 +826,40 @@ exports.updateMandalInvestment = async (req, res) => {
     return res.json({status: "SUCCESS", message: investment});  
   } catch (error) {
     return res.status(500).json({status: "ERROR", message: error.message});
+  }
+}
+
+
+exports.updateMemberStatus = async (req, res) => {
+  try {
+    const { user_id, status } = req.params;
+    console.log("Update Member Status - UserID: ", req.params);
+    console.log("status : ", status)
+    if (!user_id || typeof status === 'undefined') {
+      return res.status(400).json({ status: "ERROR", message: "User ID and status are required" });
+    }
+
+    const statusValue = !(status === "inactive");
+    console.log("statusValue : ", statusValue)
+    const user = await prisma.users.findUnique({
+      where: { user_id: parseInt(user_id) }
+    });
+
+    if (!user) {
+      return res.status(404).json({ status: "ERROR", message: "User not found" });
+    }
+
+    const updatedUser = await prisma.users.update({
+      where: { user_id: parseInt(user_id) },
+      data: { status: statusValue }
+    });
+
+    if(!updatedUser) {
+      return res.status(500).json({ status: "ERROR", message: "Failed to update user status" });
+    }
+
+    return res.json({ status: "SUCCESS", message: `User ${updatedUser.firstname} ${updatedUser.lastname} has been ${status ? 'activated' : 'deactivated'} successfully` });
+  } catch (error) {
+    return res.status(500).json({ status: "ERROR", message: error.message });
   }
 }

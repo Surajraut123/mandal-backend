@@ -1,8 +1,17 @@
 const prisma = require('../lib/prisma');
+const { checkUserRole } = require('./checkUserRole');
 
 
-exports.getInvestmentRequests = async (status = null, filters = {}) => {
+exports.getInvestmentRequests = async (userId = null, status = null, filters = {}) => {
     const whereClause = {};
+
+    if(userId) {
+        const {canViewAllRecords} = await checkUserRole(userId)
+
+        if(!canViewAllRecords) {
+            whereClause.user_id = userId
+        }
+    }
 
     if (status) {
         whereClause.request_status = status.toUpperCase();

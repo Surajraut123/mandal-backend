@@ -23,15 +23,32 @@ const {
     fetchMandalInvestments,
     requestInvestmentToAddInMandal,
     updateInvestmentRequestStatus,
-    authCheck
+    authCheck,
+    logout,
+    sendEmailOTP,
+    verifyEmailOTP,
+    resetPassword,
+    fetchProfile,
+    updateProfile,
+    updateMemberStatus
 
 } = require('../controllers/mandal.controller');
+const upload = require('../middleWare/upload');
 
 router.get('/health', checkHealth);
 router.post('/register', userRegistration);
 router.post('/login', userLogin);
 
+router.post('/verify-email', sendEmailOTP);
+router.post('/verify-email-otp', verifyEmailOTP);
+router.post('/reset-password', resetPassword);
+
+router.post('/logout', verifyToken, logout);
+
 router.get('/auth-check', verifyToken, authCheck);
+
+router.get('/profile', verifyToken, fetchProfile);
+router.patch('/update-profile', verifyToken, upload.single("profileImage"), updateProfile);
 
 router.post('/mandal-contribution', verifyToken, contributions);
 router.get('/contributed-users', verifyToken, getContributedUsers);
@@ -50,6 +67,8 @@ router.post('/mandal-investment', verifyToken, authorizeRoles("member", "treasur
 router.post('/update-mandal-investment/:investment_id', verifyToken, authorizeRoles("member", "treasurer", "admin") , updateMandalInvestment);
 
 router.get('/fetch_investments', verifyToken, authorizeRoles("member", "treasurer", "admin") , fetchMandalInvestments);
+
+router.patch('/update-member-status/:user_id/:status', verifyToken, authorizeRoles("admin") , updateMemberStatus);
 
 router.post('/ask-ai', verifyToken, handleAgent)
 

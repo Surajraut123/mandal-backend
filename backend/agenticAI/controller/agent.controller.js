@@ -9,94 +9,73 @@ const { callGroq } = require("../llmIntegration");
 const fs = require('fs');
 const path = require('path');
 const redisClient = require('../../lib/redis');
+const { buildHistoryToSend } = require("./buildHistoryToSend");
+const { updateState } = require("./updateState");
 
 
 const SYSTEM_PROMPT = fs.readFileSync(
   path.join(__dirname, '../workflows/PROMPTWORKFLOW.md'),
   'utf-8'
 );
+
+
+
 exports.handleAgent = async (req, res) => {
   try {
     const { prompt } = req.body;
     const userId = req.user.userId;
-    console.log("Received prompt:", prompt);
 
-    const key = `agent:conversation:${userId}`;
+    const historyKey = `agent:conversation:${userId}`;
+    const stateKey = `agent:state:${userId}`;
 
-    if (!redisClient.isReady) {
-      console.log("Redis not ready yet...");
-    }
+    let history = await redisClient.get(historyKey);
+    let state = await redisClient.get(stateKey);
 
-    let history = await redisClient.get(key);
     history = history ? JSON.parse(history) : [];
-    
+    state = state ? JSON.parse(state) : { currentAction: null, currentStep: null, collected: {} };
+
     if (history.length === 0) {
-      console.log("Initializing new conversation history with system prompt.");
-      history.push({
-        role: "system",
-        content: SYSTEM_PROMPT
-      });
+      history.push({ role: "system", content: SYSTEM_PROMPT });
     }
 
-    history.push({
-      role: "user",
-      content: prompt
-    });
+    history.push({ role: "user", content: prompt });
 
-    const aiResponse = await callGroq(history);
+    const historyToSend = buildHistoryToSend(history, state);
+
+
+    const aiResponse = await callGroq(historyToSend);
     const { action, data, status, filters } = aiResponse;
 
-    if (!allowedActions.includes(action)) {
-      const errorResponse = {
-        action: "NO_ACTION",
-        data: { message: aiResponse }
-      };
-    
-      history.push({
-        role: "assistant",
-        content: JSON.stringify(errorResponse)
-      });
-    
-      await redisClient.set(key, JSON.stringify(history), { EX: 900 });
-    
-      return res.status(200).json(errorResponse);
-    }
+    state = updateState(state, action, data);
 
-    history.push({
-      role: "assistant",
-      content: JSON.stringify(aiResponse)
-    });
-    
+    history.push({ role: "assistant", content: JSON.stringify(aiResponse) });
+
+    if (history.length > 11) {
+      history = [history[0], ...history.slice(-10)];
+    }
 
     let finalResponse = null;
     switch (action) {
       case "ADD_CONTRIBUTION":
-        finalResponse = await requestContributionToAdd(
-          data.donorName,
-          data.amount,
-          data.phone_no,
-          data.userId
-        );
+        finalResponse = await requestContributionToAdd(data.donorName, data.amount, data.phone_no, data.userId);
+        state = { currentAction: null, currentStep: null, collected: {} };
         break;
 
       case "ADD_INVESTMENT":
-        finalResponse = await requestInvestmentToAdd(
-          data.shopName,
-          data.userId,
-          data.amount,
-          data.title,
-          data.description
-        );
+        finalResponse = await requestInvestmentToAdd(data.shopName, data.userId, data.amount, data.title, data.description);
+        state = { currentAction: null, currentStep: null, collected: {} };
         break;
 
       case "LIST_PENDING_CONTRIBUTION_REQUESTS":
-        finalResponse  = await getContributionRequests(status, filters);
+        finalResponse = await getContributionRequests(status, filters);
         break;
+
       case "LIST_PENDING_INVESTMENT_REQUESTS":
-        finalResponse  = await getInvestmentRequests(status, filters);
+        finalResponse = await getInvestmentRequests(status, filters);
         break;
+
       case "LIST_MEMBERS":
-        finalResponse  = await getMandalMembers();
+        finalResponse = await getMandalMembers();
         break;
 
       case "NO_ACTION":
@@ -104,40 +83,19 @@ exports.handleAgent = async (req, res) => {
         break;
 
       default:
-        return res.status(200).json({
-          status: "SUCCESS",
-          message: "No Action Performed"
-        });
+        return res.status(200).json({ status: "SUCCESS", message: "No Action Performed" });
     }
 
-    history.push({
-      role: "system",
-      content: `SYSTEM ACTION RESULT: ${JSON.stringify(finalResponse)}`
-    });  
-    
-    if (history.length > 30) {
-      history = history.slice(-30);
-    }
-    
-    console.log("Current conversation history:", history);
-    await redisClient.set(
-      key,
-      JSON.stringify(history),
-      { EX: 900 }
-    );
+    history.push({ role: "system", content: `SYSTEM ACTION RESULT: ${JSON.stringify(finalResponse)}` });
 
-    return res.status(200).json({
-      status: "SUCCESS",
-      action: aiResponse.action,
-      data: finalResponse
-    });
-    
+    await redisClient.set(historyKey, JSON.stringify(history), { EX: 900 });
+    await redisClient.set(stateKey, JSON.stringify(state), { EX: 900 });
+
+    return res.status(200).json({ status: "SUCCESS", action, data: finalResponse });
+
   } catch (error) {
     console.error("Error handling agent request:", error);
-    return res.status(500).json({
-      status: "ERROR",
-      message: "Issue with AI response"
-    });
+    return res.status(500).json({ status: "ERROR", message: "Issue with AI response" });
   }
 };
 

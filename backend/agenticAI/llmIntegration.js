@@ -62,46 +62,54 @@ function sanitizeAndParseJSON(jsonString) {
   }
 }
 
-// Update your callGroq function
-async function callGroq(history) {
-  try {
-    const response = await axios.post(
-      'https://api.groq.com/openai/v1/chat/completions',
-      {
-        model: 'openai/gpt-oss-20b',
-        messages: history,
-        max_tokens: 900,
-        temperature: 0,
-        response_format: { type: "json_object" },
-      },
-      {
-        headers: {
-          'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
-          'Content-Type': 'application/json'
+async function callGroq(history, retries = 3) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const response = await axios.post(
+        'https://api.groq.com/openai/v1/chat/completions',
+        {
+          model: 'openai/gpt-oss-20b',
+          messages: history,
+          max_tokens: 900,
+          temperature: 0,
+          response_format: { type: "json_object" },
+        },
+        {
+          headers: {
+            'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+            'Content-Type': 'application/json'
+          }
         }
+      );
+
+      const aiText = response.data.choices[0].message.content;
+      console.log('AI Response:', aiText);
+
+      return sanitizeAndParseJSON(aiText);
+
+    } catch (error) {
+      const status = error.response?.status;
+      const isRateLimit = status === 429;
+
+      console.error(`Attempt ${attempt} failed | Status: ${status} | ${error.message}`);
+
+      if (isRateLimit && attempt < retries) {
+        const waitTime = attempt * 3000; // 3s → 6s → 9s
+        console.log(`Rate limited. Waiting ${waitTime / 1000}s before retry...`);
+        await new Promise(res => setTimeout(res, waitTime));
+        continue; // retry
       }
-    );
 
-    const aiText = response.data.choices[0].message.content;
-    
-    console.log('AI Response:', aiText);
-    console.log('Raw response data:', response.data.choices[0].message);
-
-    // ✅ Use sanitization instead of direct parse
-    const json = sanitizeAndParseJSON(aiText);
-
-    return json;
-    
-  } catch (error) {
-    console.error('Error calling Groq:', error.message);
-    
-    // Fallback response
-    return {
-      action: "NO_ACTION",
-      data: {
-        message: "I apologize, I encountered an error. Could you please rephrase your request?"
-      }
-    };
+      // Non rate limit error OR retries exhausted
+      return {
+        action: "NO_ACTION",
+        data: {
+          message: isRateLimit
+            ? "System is busy, please try again in a moment."
+            : "I encountered an error. Could you please rephrase your request?"
+        }
+      };
+    }
   }
 }
 module.exports = { callGroq };

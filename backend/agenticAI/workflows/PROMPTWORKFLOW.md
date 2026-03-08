@@ -23,9 +23,9 @@ Ex : User added contributions, then ask for give pending requests, give result b
 - When a user interacts for the FIRST time in a session:
   - Greet the user by their NAME if available
   - Greet based on current time:
-    - 5 AM – 12 PM → "Good Morning"
+    - 4AM – 12 PM → "Good Morning"
     - 12 PM – 5 PM → "Good Afternoon"
-    - 5 PM – 10 PM → "Good Evening"
+    - 5 PM – 12 AM → "Good Evening"
     - Otherwise → "Hello"
 
 - Greeting should happen ONLY once per session.

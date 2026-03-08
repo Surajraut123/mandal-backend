@@ -4,7 +4,7 @@ exports.requestContributionToAdd = async (donorName, amount, phone_no, userId) =
     return await prisma.contribution_requests.create({
         data: {
           donor_name: donorName,
-          amount: String(amount),
+          amount: Number(amount),
           users : {
             connect: { user_id: Number(userId) }
           },

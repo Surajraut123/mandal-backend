@@ -24,8 +24,6 @@ redisClient.on("ready", () => {
 });
 
 (async () => {
-console.log("Redis cleared.");
-
   await redisClient.connect();
 })();
 
