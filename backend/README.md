@@ -66,3 +66,10 @@ api : /mandal-investment
   "shopName" : "Mangilal",
   "role" : "member"
 }
+
+
+<!-- For contribution, if apply the filter for donor name, if the same name already exist ask user to confirm is it same, else add proper naem to identify that user. and flag for that from client.
+
+
+
+ -->
