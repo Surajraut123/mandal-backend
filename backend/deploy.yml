@@ -1,0 +1,56 @@
+name: Backend CIC/CI Pipeline
+
+on: 
+  push:
+    branches: 
+      - main
+
+
+jobs: 
+  build-and-deploy: 
+    runs-on: ubuntu-latest
+
+    steps: 
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup/node@v3
+        with: 
+          node-version: '20'
+
+      - name: Notify Google Chat - Started
+        run: |
+          curl -X POST "${{ secrets.GOOGLE_CHAT_WEBHOOK_URL }}" \
+          -H "Content-Type: application/json" \
+          -d '{
+            "text": "🚀 *Backend Deploy Started*\n Branch: `main`\n Triggered by: ${{ github.actor }}\n Commit: ${{ github.event.head_commit.message }}"
+          }'
+
+      - name: Install Dependencies
+        run: npm install
+      
+      - name: Build Project
+        run: npm run build
+
+      - name: Deploy to Render
+        run : |
+          curl -X POST ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+
+      - name: Notify Google Chat - Success
+        if: success()
+        run: |
+          curl -X POST "${{ secrets.GOOGLE_CHAT_WEBHOOK_URL }}" \
+          -H "Content-Type: application/json" \
+          -d '{
+            "text": "✅ *Backend Deploy Successful!*\n Branch: `main`\n Triggered by: ${{ github.actor }}\n Commit: ${{ github.event.head_commit.message }}"
+          }'
+      
+      - name: Notify Google Chat - Failed
+        if: failure()
+        run: |
+          curl -X POST "${{ secrets.GOOGLE_CHAT_WEBHOOK_URL }}" \
+          -H "Content-Type: application/json" \
+          -d '{
+            "text": "❌ *Backend Deploy Failed!*\n Branch: `main`\n Triggered by: ${{ github.actor }}\n Commit: ${{ github.event.head_commit.message }}"
+          }'
