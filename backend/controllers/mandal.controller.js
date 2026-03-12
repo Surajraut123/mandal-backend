@@ -322,7 +322,7 @@ exports.userLogin = async (req, res) => {
 
         res.cookie("access_token", token, {
           httpOnly: true,
-          secure: true,
+          secure: false,
           sameSite: "none",
         });
 
