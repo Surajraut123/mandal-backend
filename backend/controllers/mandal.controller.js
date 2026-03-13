@@ -323,7 +323,7 @@ exports.userLogin = async (req, res) => {
         res.cookie("access_token", token, {
           httpOnly: true,
           secure: false,
-          sameSite: "none",
+          sameSite: "lax",
         });
 
         console.log("Generated Token: ", token); 
