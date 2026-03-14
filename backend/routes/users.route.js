@@ -33,6 +33,7 @@ const {
     updateMemberStatus
 
 } = require('../controllers/mandal.controller');
+
 const upload = require('../middleWare/upload');
 
 router.get('/health', checkHealth);
