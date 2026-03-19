@@ -14,7 +14,6 @@ const frontendURL = process.env.FRONTEND_URL || `http://localhost:${port}`;
   
 const allowedOrigins = ['http://localhost:5173', frontendURL];
 
-
 app.use(cors({
   origin: function (origin, callback) {
     if (!origin) return callback(null, true);
